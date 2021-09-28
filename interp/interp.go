@@ -188,6 +188,7 @@ type opt struct {
 	specialStdio bool              // allows os.Stdin, os.Stdout, os.Stderr to not be file descriptors
 	unrestricted bool              // allow use of non sandboxed symbols
 	goCache      string            // GOCACHE
+	goToolDir    string            // GOTOOLDIR
 }
 
 // Interpreter contains global resources and state.
@@ -305,6 +306,9 @@ type Options struct {
 	// GoCache sets GOCACHE for the interpreter.
 	GoCache string
 
+	// GoToolDir sets the GOTOOLDIR for the interpreter.
+	GoToolDir string
+
 	// BuildTags sets build constraints for the interpreter.
 	BuildTags []string
 
@@ -332,7 +336,7 @@ type Options struct {
 // New returns a new interpreter.
 func New(options Options) *Interpreter {
 	i := Interpreter{
-		opt:      opt{context: build.Default, filesystem: &realFS{}, env: map[string]string{}, goCache: options.GoCache},
+		opt:      opt{context: build.Default, filesystem: &realFS{}, env: map[string]string{}, goCache: options.GoCache, goToolDir: options.GoToolDir},
 		frame:    newFrame(nil, 0, 0),
 		fset:     token.NewFileSet(),
 		universe: initUniverse(),
