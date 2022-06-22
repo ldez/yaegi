@@ -219,7 +219,7 @@ func genValue(n *node) func(*frame) reflect.Value {
 func genDestValue(typ *itype, n *node) func(*frame) reflect.Value {
 	convertLiteralValue(n, typ.TypeOf())
 	switch {
-	case isInterfaceSrc(typ) && !isEmptyInterface(typ):
+	case isInterfaceSrc(typ) && (!isEmptyInterface(typ) || len(n.typ.method) > 0):
 		return genValueInterface(n)
 	case isFuncSrc(typ) && (n.typ.cat == valueT || n.typ.cat == nilT):
 		return genValueNode(n)
@@ -408,7 +408,7 @@ func genValueInterfaceValue(n *node) func(*frame) reflect.Value {
 
 	return func(f *frame) reflect.Value {
 		v := value(f)
-		if v.Interface().(valueInterface).node == nil {
+		if vi, ok := v.Interface().(valueInterface); ok && vi.node == nil {
 			// Uninitialized interface value, set it to a correct zero value.
 			v.Set(zeroInterfaceValue())
 			v = value(f)
@@ -421,7 +421,11 @@ func genValueNode(n *node) func(*frame) reflect.Value {
 	value := genValue(n)
 
 	return func(f *frame) reflect.Value {
-		return reflect.ValueOf(&node{rval: value(f)})
+		v := value(f)
+		if _, ok := v.Interface().(*node); ok {
+			return v
+		}
+		return reflect.ValueOf(&node{rval: v})
 	}
 }
 
@@ -591,5 +595,6 @@ func genComplex(n *node) func(*frame) complex128 {
 
 func genValueString(n *node) func(*frame) (reflect.Value, string) {
 	value := genValue(n)
+
 	return func(f *frame) (reflect.Value, string) { v := value(f); return v, v.String() }
 }

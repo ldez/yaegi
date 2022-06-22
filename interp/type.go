@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/traefik/yaegi/internal/unsafe2"
 )
@@ -110,7 +109,6 @@ type structField struct {
 
 // itype defines the internal representation of types in the interpreter.
 type itype struct {
-	mu          *sync.Mutex
 	cat         tcat          // Type category
 	field       []structField // Array of struct fields if structT or interfaceT
 	key         *itype        // Type of key element if MapT or nil
@@ -1827,6 +1825,7 @@ func (t *itype) refType(ctx *refTypeContext) reflect.Type {
 				}
 			}
 		}
+		fieldFix := []int{} // Slice of field indices to fix for recursivity.
 		t.rtype = reflect.StructOf(fields)
 		if ctx.isComplete() {
 			for _, s := range ctx.defined {
@@ -1834,6 +1833,9 @@ func (t *itype) refType(ctx *refTypeContext) reflect.Type {
 					f := s.rtype.Field(i)
 					if strings.HasSuffix(f.Type.String(), "unsafe2.dummy") {
 						unsafe2.SetFieldType(s.rtype, i, ctx.rect.fixDummy(s.rtype.Field(i).Type))
+						if name == s.path+"/"+s.name {
+							fieldFix = append(fieldFix, i)
+						}
 					}
 				}
 			}
@@ -1842,13 +1844,16 @@ func (t *itype) refType(ctx *refTypeContext) reflect.Type {
 		// The rtype has now been built, we can go back and rebuild
 		// all the recursive types that relied on this type.
 		// However, as we are keyed by type name, if two or more (recursive) fields at
-		// the same depth level are of the same type, they "mask" each other, and only one
-		// of them is in ctx.refs, which means this pass below does not fully do the job.
-		// Which is why we have the pass above that is done one last time, for all fields,
-		// one the recursion has been fully resolved.
+		// the same depth level are of the same type, or a "variation" of the same type
+		// (slice of, map of, etc), they "mask" each other, and only one
+		// of them is in ctx.refs. That is why the code around here is a bit convoluted,
+		// and we need both the loop above, around all the struct fields, and the loop
+		// below, around the ctx.refs.
 		for _, f := range ctx.refs[name] {
-			ftyp := f.typ.field[f.idx].typ.refType(&refTypeContext{defined: ctx.defined, rebuilding: true})
-			unsafe2.SetFieldType(f.typ.rtype, f.idx, ftyp)
+			for _, index := range fieldFix {
+				ftyp := f.typ.field[index].typ.refType(&refTypeContext{defined: ctx.defined, rebuilding: true})
+				unsafe2.SetFieldType(f.typ.rtype, index, ftyp)
+			}
 		}
 	default:
 		if z, _ := t.zero(); z.IsValid() {

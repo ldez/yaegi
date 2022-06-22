@@ -3,6 +3,7 @@ package interp
 import (
 	"errors"
 	"go/constant"
+	"go/token"
 	"math"
 	"reflect"
 )
@@ -124,6 +125,8 @@ func (check typecheck) starExpr(n *node) error {
 }
 
 var unaryOpPredicates = opPredicates{
+	aInc:    isNumber,
+	aDec:    isNumber,
 	aPos:    isNumber,
 	aNeg:    isNumber,
 	aBitNot: isInt,
@@ -133,6 +136,9 @@ var unaryOpPredicates = opPredicates{
 // unaryExpr type checks a unary expression.
 func (check typecheck) unaryExpr(n *node) error {
 	c0 := n.child[0]
+	if isBlank(c0) {
+		return n.cfgErrorf("cannot use _ as value")
+	}
 	t0 := c0.typ.TypeOf()
 
 	if n.action == aRecv {
@@ -196,7 +202,7 @@ func (check typecheck) comparison(n *node) error {
 		if typ.isNil() {
 			typ = c1.typ
 		}
-		return n.cfgErrorf("invalid operation: operator %v not defined on %s", n.action, typ.id(), ".")
+		return n.cfgErrorf("invalid operation: operator %v not defined on %s", n.action, typ.id())
 	}
 	return nil
 }
@@ -220,6 +226,10 @@ var binaryOpPredicates = opPredicates{
 // binaryExpr type checks a binary expression.
 func (check typecheck) binaryExpr(n *node) error {
 	c0, c1 := n.child[0], n.child[1]
+
+	if isBlank(c0) || isBlank(c1) {
+		return n.cfgErrorf("cannot use _ as value")
+	}
 
 	a := n.action
 	if isAssignAction(a) {
@@ -476,6 +486,12 @@ func (check typecheck) structBinLitExpr(child []*node, typ reflect.Type) error {
 
 // sliceExpr type checks a slice expression.
 func (check typecheck) sliceExpr(n *node) error {
+	for _, c := range n.child {
+		if isBlank(c) {
+			return n.cfgErrorf("cannot use _ as value")
+		}
+	}
+
 	c, child := n.child[0], n.child[1:]
 
 	t := c.typ.TypeOf()
@@ -591,6 +607,12 @@ func (check typecheck) typeAssertionExpr(n *node, typ *itype) error {
 			continue
 		}
 		if tm == nil {
+			// Lookup for non-exported methods is impossible
+			// for bin types, ignore them as they can't be used
+			// directly by the interpreted programs.
+			if !token.IsExported(name) && isBin(typ) {
+				continue
+			}
 			return n.cfgErrorf("impossible type assertion: %s does not implement %s (missing %v method)", typ.id(), n.typ.id(), name)
 		}
 		if tm.recv != nil && tm.recv.TypeOf().Kind() == reflect.Ptr && typ.TypeOf().Kind() != reflect.Ptr {

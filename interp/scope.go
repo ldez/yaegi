@@ -47,7 +47,7 @@ type symbol struct {
 	kind    sKind
 	typ     *itype        // Type of value
 	node    *node         // Node value if index is negative
-	from    []*node       // list of nodes jumping to node if kind is label, or nil
+	from    []*node       // list of goto nodes jumping to this label node, or nil
 	recv    *receiver     // receiver node value, if sym refers to a method
 	index   int           // index of value in frame or -1
 	rval    reflect.Value // default value (used for constants)
@@ -144,20 +144,6 @@ func (s *scope) lookup(ident string) (*symbol, int, bool) {
 	return nil, 0, false
 }
 
-// lookdown searches for a symbol in the current scope and included ones, recursively.
-// It returns the first found symbol and true, or nil and false.
-func (s *scope) lookdown(ident string) (*symbol, bool) {
-	if sym, ok := s.sym[ident]; ok {
-		return sym, true
-	}
-	for _, c := range s.child {
-		if sym, ok := c.lookdown(ident); ok {
-			return sym, true
-		}
-	}
-	return nil, false
-}
-
 func (s *scope) rangeChanType(n *node) *itype {
 	if sym, _, found := s.lookup(n.child[1].ident); found {
 		if t := sym.typ; len(n.child) == 3 && t != nil && (t.cat == chanT || t.cat == chanRecvT) {
@@ -240,4 +226,27 @@ func (interp *Interpreter) initScopePkg(pkgID, pkgName string) *scope {
 	sc.pkgName = pkgName
 	interp.mutex.Unlock()
 	return sc
+}
+
+// Globals returns a map of global variables and constants in the main package.
+func (interp *Interpreter) Globals() map[string]reflect.Value {
+	syms := map[string]reflect.Value{}
+	interp.mutex.RLock()
+	defer interp.mutex.RUnlock()
+
+	v, ok := interp.srcPkg["main"]
+	if !ok {
+		return syms
+	}
+
+	for n, s := range v {
+		switch s.kind {
+		case constSym:
+			syms[n] = s.rval
+		case varSym:
+			syms[n] = interp.frame.data[s.index]
+		}
+	}
+
+	return syms
 }

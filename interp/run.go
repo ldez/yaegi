@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
-	"sync"
 )
 
 // bltn type defines functions which run at CFG execution.
@@ -1229,12 +1228,14 @@ func call(n *node) {
 				convertLiteralValue(c, argType)
 			}
 			switch {
-			case isEmptyInterface(arg):
+			case hasVariadicArgs:
 				values = append(values, genValue(c))
-			case isInterfaceSrc(arg) && !hasVariadicArgs:
+			case isInterfaceSrc(arg) && (!isEmptyInterface(arg) || len(c.typ.method) > 0):
 				values = append(values, genValueInterface(c))
 			case isInterfaceBin(arg):
 				values = append(values, genInterfaceWrapper(c, arg.rtype))
+			case isFuncSrc(arg):
+				values = append(values, genValueNode(c))
 			default:
 				values = append(values, genValue(c))
 			}
@@ -1404,12 +1405,22 @@ func call(n *node) {
 					}
 				default:
 					val := v(f)
-					// The !val.IsZero is to work around a recursive struct zero interface
-					// issue. Once there is a better way to handle this case, the dest
-					// can just be set.
-					if !val.IsZero() || dest[i].Kind() == reflect.Interface {
-						dest[i].Set(val)
+					if val.IsZero() && dest[i].Kind() != reflect.Interface {
+						// Work around a recursive struct zero interface issue.
+						// Once there is a better way to handle this case, the dest can just be set.
+						continue
 					}
+					if nod, ok := val.Interface().(*node); ok && nod.recv != nil {
+						// An interpreted method is passed as value in a function call.
+						// It must be wrapped now, otherwise the receiver will be missing
+						// at the method call (#1332).
+						// TODO (marc): wrapping interpreted functions should be always done
+						// everywhere at runtime to simplify the whole code,
+						// but it requires deeper refactoring.
+						dest[i] = genFunctionWrapper(nod)(f)
+						continue
+					}
+					dest[i].Set(val)
 				}
 			}
 		}
@@ -1755,9 +1766,6 @@ func getIndexArray(n *node) {
 	}
 }
 
-// valueInterfaceType is the reflection type of valueInterface.
-var valueInterfaceType = reflect.TypeOf((*valueInterface)(nil)).Elem()
-
 // getIndexMap retrieves map value from index.
 func getIndexMap(n *node) {
 	dest := genValue(n)
@@ -1822,7 +1830,6 @@ func getIndexMap2(n *node) {
 	value0 := genValue(n.child[0])     // map
 	value2 := genValue(n.anc.child[1]) // status
 	next := getExec(n.tnext)
-	typ := n.anc.child[0].typ
 	doValue := n.anc.child[0].ident != "_"
 	doStatus := n.anc.child[1].ident != "_"
 
@@ -1837,21 +1844,6 @@ func getIndexMap2(n *node) {
 			n.exec = func(f *frame) bltn {
 				v := value0(f).MapIndex(mi)
 				value2(f).SetBool(v.IsValid())
-				return next
-			}
-		case isInterfaceSrc(typ):
-			n.exec = func(f *frame) bltn {
-				v := value0(f).MapIndex(mi)
-				if v.IsValid() {
-					if e := v.Elem(); e.Type().AssignableTo(valueInterfaceType) {
-						dest(f).Set(e)
-					} else {
-						dest(f).Set(reflect.ValueOf(valueInterface{n, e}))
-					}
-				}
-				if doStatus {
-					value2(f).SetBool(v.IsValid())
-				}
 				return next
 			}
 		default:
@@ -1873,21 +1865,6 @@ func getIndexMap2(n *node) {
 			n.exec = func(f *frame) bltn {
 				v := value0(f).MapIndex(value1(f))
 				value2(f).SetBool(v.IsValid())
-				return next
-			}
-		case isInterfaceSrc(typ):
-			n.exec = func(f *frame) bltn {
-				v := value0(f).MapIndex(value1(f))
-				if v.IsValid() {
-					if e := v.Elem(); e.Type().AssignableTo(valueInterfaceType) {
-						dest(f).Set(e)
-					} else {
-						dest(f).Set(reflect.ValueOf(valueInterface{n, e}))
-					}
-				}
-				if doStatus {
-					value2(f).SetBool(v.IsValid())
-				}
 				return next
 			}
 		default:
@@ -2614,6 +2591,9 @@ func doCompositeBinStruct(n *node, hasType bool) {
 		}
 	}
 
+	frameIndex := n.findex
+	l := n.level
+
 	n.exec = func(f *frame) bltn {
 		s := reflect.New(typ).Elem()
 		for i, v := range values {
@@ -2624,7 +2604,7 @@ func doCompositeBinStruct(n *node, hasType bool) {
 		case d.Kind() == reflect.Ptr:
 			d.Set(s.Addr())
 		default:
-			d.Set(s)
+			getFrame(f, l).data[frameIndex] = s
 		}
 		return next
 	}
@@ -2649,8 +2629,6 @@ func doComposite(n *node, hasType bool, keyed bool) {
 	if typ.cat == ptrT || typ.cat == aliasT {
 		typ = typ.val
 	}
-	var mu sync.Mutex
-	typ.mu = &mu
 	child := n.child
 	if hasType {
 		child = n.child[1:]
@@ -2678,7 +2656,7 @@ func doComposite(n *node, hasType bool, keyed bool) {
 			values[fieldIndex] = genValueAsFunctionWrapper(val)
 		case isArray(val.typ) && val.typ.val != nil && isInterfaceSrc(val.typ.val) && !isEmptyInterface(val.typ.val):
 			values[fieldIndex] = genValueInterfaceArray(val)
-		case isInterfaceSrc(ft) && !isEmptyInterface(ft):
+		case isInterfaceSrc(ft) && (!isEmptyInterface(ft) || len(val.typ.method) > 0):
 			values[fieldIndex] = genValueInterface(val)
 		case isInterface(ft):
 			values[fieldIndex] = genInterfaceWrapper(val, rft)
@@ -2689,11 +2667,10 @@ func doComposite(n *node, hasType bool, keyed bool) {
 
 	frameIndex := n.findex
 	l := n.level
+	rt := typ.TypeOf()
+
 	n.exec = func(f *frame) bltn {
-		typ.mu.Lock()
-		// No need to call zero() as doComposite is only called for a structT.
-		a := reflect.New(typ.TypeOf()).Elem()
-		typ.mu.Unlock()
+		a := reflect.New(rt).Elem()
 		for i, v := range values {
 			a.Field(i).Set(v(f))
 		}
@@ -3120,9 +3097,7 @@ func _append(n *node) {
 		values := make([]func(*frame) reflect.Value, l)
 		for i, arg := range args {
 			switch elem := n.typ.elem(); {
-			case isEmptyInterface(elem):
-				values[i] = genValue(arg)
-			case isInterfaceSrc(elem):
+			case isInterfaceSrc(elem) && (!isEmptyInterface(elem) || len(arg.typ.method) > 0):
 				values[i] = genValueInterface(arg)
 			case isInterfaceBin(elem):
 				values[i] = genInterfaceWrapper(arg, elem.rtype)
@@ -3144,9 +3119,7 @@ func _append(n *node) {
 	default:
 		var value0 func(*frame) reflect.Value
 		switch elem := n.typ.elem(); {
-		case isEmptyInterface(elem):
-			value0 = genValue(n.child[2])
-		case isInterfaceSrc(elem):
+		case isInterfaceSrc(elem) && (!isEmptyInterface(elem) || len(n.child[2].typ.method) > 0):
 			value0 = genValueInterface(n.child[2])
 		case isInterfaceBin(elem):
 			value0 = genInterfaceWrapper(n.child[2], elem.rtype)
