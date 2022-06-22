@@ -34,10 +34,10 @@ func valueGenerator(n *node, i int) func(*frame) reflect.Value {
 // because a cancellation prior to any evaluation result may leave
 // the frame's data empty.
 func valueOf(data []reflect.Value, i int) reflect.Value {
-	if i < len(data) {
-		return data[i]
+	if i < 0 || i >= len(data) {
+		return reflect.Value{}
 	}
-	return reflect.Value{}
+	return data[i]
 }
 
 func genValueBinMethodOnInterface(n *node, defaultGen func(*frame) reflect.Value) func(*frame) reflect.Value {
@@ -195,7 +195,7 @@ func genValue(n *node) func(*frame) reflect.Value {
 		}
 		if n.sym != nil {
 			i := n.sym.index
-			if i < 0 {
+			if i < 0 && n != n.sym.node {
 				return genValue(n.sym.node)
 			}
 			if n.sym.global {
@@ -390,6 +390,21 @@ func genValueOutput(n *node, t reflect.Type) func(*frame) reflect.Value {
 		}
 	}
 	return value
+}
+
+func getBinValue(getMapType func(*itype) reflect.Type, value func(*frame) reflect.Value, f *frame) reflect.Value {
+	v := value(f)
+	if getMapType == nil {
+		return v
+	}
+	val, ok := v.Interface().(valueInterface)
+	if !ok || val.node == nil {
+		return v
+	}
+	if rt := getMapType(val.node.typ); rt != nil {
+		return genInterfaceWrapper(val.node, rt)(f)
+	}
+	return v
 }
 
 func valueInterfaceValue(v reflect.Value) reflect.Value {

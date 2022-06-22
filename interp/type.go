@@ -238,9 +238,6 @@ func namedOf(val *itype, path, name string, opts ...itypeOption) *itype {
 	if path != "" {
 		str = path + "." + name
 	}
-	for val.cat == aliasT {
-		val = val.val
-	}
 	t := &itype{cat: aliasT, val: val, path: path, name: name, str: str}
 	for _, opt := range opts {
 		opt(t)
@@ -585,12 +582,12 @@ func nodeType2(interp *Interpreter, sc *scope, n *node, seen []*node) (t *itype,
 				}
 				if !t.incomplete {
 					switch k := t.TypeOf().Kind(); {
+					case t.untyped && isNumber(t.TypeOf()):
+						t = untypedFloat()
 					case k == reflect.Complex64:
 						t = sc.getType("float32")
 					case k == reflect.Complex128:
 						t = sc.getType("float64")
-					case t.untyped && isNumber(t.TypeOf()):
-						t = valueTOf(floatType, withUntyped(true), withScope(sc))
 					default:
 						err = n.cfgErrorf("invalid complex type %s", k)
 					}
@@ -1125,6 +1122,24 @@ func (t *itype) concrete() *itype {
 	return t
 }
 
+func (t *itype) underlying() *itype {
+	if t.cat == aliasT {
+		return t.val.underlying()
+	}
+	return t
+}
+
+// typeDefined returns true if type t1 is defined from type t2 or t2 from t1.
+func typeDefined(t1, t2 *itype) bool {
+	if t1.cat == aliasT && t1.val == t2 {
+		return true
+	}
+	if t2.cat == aliasT && t2.val == t1 {
+		return true
+	}
+	return false
+}
+
 // isVariadic returns true if the function type is variadic.
 // If the type is not a function or is not variadic, it will
 // return false.
@@ -1198,8 +1213,7 @@ func (t *itype) assignableTo(o *itype) bool {
 	if t.equals(o) {
 		return true
 	}
-	if t.cat == aliasT && o.cat == aliasT {
-		// If alias types are not identical, it is not assignable.
+	if t.cat == aliasT && o.cat == aliasT && (t.underlying().id() != o.underlying().id() || !typeDefined(t, o)) {
 		return false
 	}
 	if t.isNil() && o.hasNil() || o.isNil() && t.hasNil() {
@@ -1216,6 +1230,11 @@ func (t *itype) assignableTo(o *itype) bool {
 
 	if t.isBinMethod && isFunc(o) {
 		// TODO (marc): check that t without receiver as first parameter is equivalent to o.
+		return true
+	}
+
+	if t.untyped && isNumber(t.TypeOf()) && isNumber(o.TypeOf()) {
+		// Assignability depends on constant numeric value (overflow check), to be tested elsewhere.
 		return true
 	}
 

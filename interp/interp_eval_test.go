@@ -176,7 +176,7 @@ func TestEvalBuiltin(t *testing.T) {
 		{src: `m := complex(3, 2); real(m)`, res: "3"},
 		{src: `m := complex(3, 2); imag(m)`, res: "2"},
 		{src: `m := complex("test", 2)`, err: "1:33: invalid types string and int"},
-		{src: `imag("test")`, err: "1:33: cannot convert \"test\" to complex128"},
+		{src: `imag("test")`, err: "1:33: cannot convert untyped string to untyped complex"},
 		{src: `imag(a)`, err: "1:33: invalid argument type []int for imag"},
 		{src: `real(a)`, err: "1:33: invalid argument type []int for real"},
 		{src: `t := map[int]int{}; t[123]++; t`, res: "map[123:1]"},
@@ -184,6 +184,9 @@ func TestEvalBuiltin(t *testing.T) {
 		{src: `t := map[int]int{}; t[123] += 1; t`, res: "map[123:1]"},
 		{src: `t := map[int]int{}; t[123] -= 1; t`, res: "map[123:-1]"},
 		{src: `println("hello", _)`, err: "1:28: cannot use _ as value"},
+		{src: `f := func() complex64 { return complex(0, 0) }()`, res: "(0+0i)"},
+		{src: `f := func() float32 { return real(complex(2, 1)) }()`, res: "2"},
+		{src: `f := func() int8 { return imag(complex(2, 1)) }()`, res: "1"},
 	})
 }
 
@@ -437,7 +440,7 @@ func TestEvalComparison(t *testing.T) {
 		{src: `a, b, c := 1, 1, false; if a == b { c = true }; c`, res: "true"},
 		{src: `a, b, c := 1, 2, false; if a != b { c = true }; c`, res: "true"},
 		{
-			desc: "mismatched types",
+			desc: "mismatched types equality",
 			src: `
 				type Foo string
 				type Bar string
@@ -445,6 +448,18 @@ func TestEvalComparison(t *testing.T) {
 				var a = Foo("test")
 				var b = Bar("test")
 				var c = a == b
+			`,
+			err: "7:13: invalid operation: mismatched types main.Foo and main.Bar",
+		},
+		{
+			desc: "mismatched types less than",
+			src: `
+				type Foo string
+				type Bar string
+
+				var a = Foo("test")
+				var b = Bar("test")
+				var c = a < b
 			`,
 			err: "7:13: invalid operation: mismatched types main.Foo and main.Bar",
 		},
@@ -703,6 +718,29 @@ func TestEvalBinCall(t *testing.T) {
 		{src: `i := 1
 			   a := fmt.Sprintf(i)`, err: "2:24: cannot use type int as type string"},
 		{src: `a := fmt.Sprint()`, res: ""},
+	})
+}
+
+func TestEvalReflect(t *testing.T) {
+	i := interp.New(interp.Options{})
+	if err := i.Use(stdlib.Symbols); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := i.Eval(`
+		import (
+			"net/url"
+			"reflect"
+		)
+
+		type Encoder interface {
+			EncodeValues(key string, v *url.Values) error
+		}
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	runTests(t, i, []testCase{
+		{src: "reflect.TypeOf(new(Encoder)).Elem()", res: "interp.valueInterface"},
 	})
 }
 
@@ -1372,7 +1410,7 @@ func testConcurrentComposite(t *testing.T, filePath string) {
 	}
 }
 
-func TestEvalScanner(t *testing.T) {
+func TestEvalREPL(t *testing.T) {
 	if testing.Short() {
 		return
 	}
@@ -1457,6 +1495,13 @@ func TestEvalScanner(t *testing.T) {
 			src: []string{
 				`type bar string`,
 				`func (b bar) foo() { println(3) }`,
+			},
+			errorLine: -1,
+		},
+		{
+			desc: "define a label",
+			src: []string{
+				`a:`,
 			},
 			errorLine: -1,
 		},
