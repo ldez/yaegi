@@ -3,7 +3,6 @@ package interp
 import (
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -31,10 +30,8 @@ func (interp *Interpreter) importSrc(rPath, importPath string, skipTest bool) (s
 			rPath = "."
 		}
 		dir = filepath.Join(filepath.Dir(interp.name), rPath, importPath)
-	} else {
-		if dir, err = interp.getPackageDir(importPath); err != nil {
-			return "", err
-		}
+	} else if dir, err = interp.getPackageDir(importPath); err != nil {
+		return "", err
 	}
 
 	if interp.rdir[importPath] {
@@ -165,34 +162,14 @@ func (interp *Interpreter) importSrc(rPath, importPath string, skipTest bool) (s
 	return pkgName, nil
 }
 
-// rootFromSourceLocation returns the path to the directory containing the input
-// Go file given to the interpreter, relative to $GOPATH/src.
-// It is meant to be called in the case when the initial input is a main package.
-func (interp *Interpreter) rootFromSourceLocation() (string, error) {
-	sourceFile := interp.name
-	if sourceFile == DefaultSourceName {
-		return "", nil
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	pkgDir := filepath.Join(wd, filepath.Dir(sourceFile))
-	root := strings.TrimPrefix(pkgDir, filepath.Join(interp.context.GOPATH, "src")+"/")
-	if root == wd {
-		return "", fmt.Errorf("package location %s not in GOPATH", pkgDir)
-	}
-	return root, nil
-}
-
-// getPackageDir uses the GOPATH to find the absolute path of an import path
+// getPackageDir uses the GOPATH to find the absolute path of an import path.
 func (interp *Interpreter) getPackageDir(importPath string) (string, error) {
 	// search the standard library and Go modules.
 	config := packages.Config{}
 	config.Env = append(config.Env, "GOPATH="+interp.context.GOPATH, "GOCACHE="+interp.opt.env["goCache"], "GOTOOLDIR="+interp.opt.env["goToolDir"])
 	pkgs, err := packages.Load(&config, importPath)
 	if err != nil {
-		return "", fmt.Errorf("An error occurred retrieving a package from the GOPATH: %v\n%v\nIf Access is denied, run in administrator.", importPath, err)
+		return "", fmt.Errorf("an error occurred retrieving a package from the GOPATH: %v\n%v\nIf Access is denied, run in administrator", importPath, err)
 	}
 
 	// confirm the import path is found.
@@ -210,12 +187,12 @@ func (interp *Interpreter) getPackageDir(importPath string) (string, error) {
 		// this approach prevents the computer from searching the entire filesystem
 		godir, err := searchUpDirPath(interp.opt.env["goToolDir"], "go", false)
 		if err != nil {
-			return "", fmt.Errorf("An import source could not be found: %q\nThe current GOPATH=%v, GOCACHE=%v, GOTOOLDIR=%v\n%v", importPath, interp.context.GOPATH, interp.opt.env["goCache"], interp.opt.env["goToolDir"], err)
+			return "", fmt.Errorf("an import source could not be found: %q\nThe current GOPATH=%v, GOCACHE=%v, GOTOOLDIR=%v\n%v", importPath, interp.context.GOPATH, interp.opt.env["goCache"], interp.opt.env["goToolDir"], err)
 		}
 
 		absimportpath, err := searchDirs(godir, importPath)
 		if err != nil {
-			return "", fmt.Errorf("An import source could not be found: %q\nThe current GOPATH=%v, GOCACHE=%v, GOTOOLDIR=%v\n%v", importPath, interp.context.GOPATH, interp.opt.env["goCache"], interp.opt.env["goToolDir"], err)
+			return "", fmt.Errorf("an import source could not be found: %q\nThe current GOPATH=%v, GOCACHE=%v, GOTOOLDIR=%v\n%v", importPath, interp.context.GOPATH, interp.opt.env["goCache"], interp.opt.env["goToolDir"], err)
 		}
 		return absimportpath, nil
 	}
