@@ -181,10 +181,10 @@ func (interp *Interpreter) getPackageDir(importPath string) (string, error) {
 		}
 	}
 
-	// check for certain go tools located in GOTOOLDIR
+	// check for certain go tools located in GOTOOLDIR.
 	if interp.opt.env["goToolDir"] != "" {
-		// search for the go directory before searching for packages
-		// this approach prevents the computer from searching the entire filesystem
+		// search for the go directory before searching for packages.
+		// this approach prevents the computer from searching the entire filesystem.
 		godir, err := searchUpDirPath(interp.opt.env["goToolDir"], "go", false)
 		if err != nil {
 			return "", fmt.Errorf("an import source could not be found: %q\nThe current GOPATH=%v, GOCACHE=%v, GOTOOLDIR=%v\n%v", importPath, interp.context.GOPATH, interp.opt.env["goCache"], interp.opt.env["goToolDir"], err)
@@ -197,12 +197,12 @@ func (interp *Interpreter) getPackageDir(importPath string) (string, error) {
 		return absimportpath, nil
 	}
 
-	return "", fmt.Errorf("An import source could not be found: %q. Set the GOPATH and/or GOTOOLDIR environment variable from Interpreter.Options.", importPath)
+	return "", fmt.Errorf("an import source could not be found: %q. Set the GOPATH and/or GOTOOLDIR environment variable from Interpreter.Options.", importPath)
 }
 
 // searchUpDirPath searches up a directory path in order to find a target directory.
 func searchUpDirPath(initial string, target string, isCaseSensitive bool) (string, error) {
-	// strings.Split always returns [:0] as filepath.Dir returns "." or the last directory
+	// strings.Split always returns [:0] as filepath.Dir returns "." or the last directory.
 	splitdir := strings.Split(filepath.Join(initial), string(filepath.Separator))
 	if len(splitdir) == 1 {
 		return "", fmt.Errorf("The target directory %q is not within the path %q", target, initial)
@@ -225,7 +225,7 @@ func searchDirs(initial string, target string) (string, error) {
 		return "", err
 	}
 
-	// find the go directory
+	// find the go directory.
 	var foundpath string
 	filter := func(path string, d fs.DirEntry, err error) error {
 		if d.IsDir() {

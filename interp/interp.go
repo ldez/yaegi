@@ -174,6 +174,8 @@ type opt struct {
 	// dotCmd is the command to process the dot graph produced when astDot and/or
 	// cfgDot is enabled. It defaults to 'dot -Tdot -o <filename>.dot'.
 	dotCmd       string
+	noRun        bool              // compile, but do not run
+	fastChan     bool              // disable cancellable chan operations
 	context      build.Context     // build context: GOPATH, build constraints
 	stdin        io.Reader         // standard input
 	stdout       io.Writer         // standard output
@@ -183,8 +185,6 @@ type opt struct {
 	filesystem   fs.FS             // filesystem containing sources
 	astDot       bool              // display AST graph (debug)
 	cfgDot       bool              // display CFG graph (debug)
-	noRun        bool              // compile, but do not run
-	fastChan     bool              // disable cancellable chan operations
 	specialStdio bool              // allows os.Stdin, os.Stdout, os.Stderr to not be file descriptors
 	unrestricted bool              // allow use of non sandboxed symbols
 }
